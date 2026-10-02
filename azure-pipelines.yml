@@ -1,0 +1,46 @@
+trigger: none
+
+pool:
+  name: SelfHostedPool
+
+steps:
+- task: AzureCLI@2
+  displayName: Terraform init, plan, apply, and outputs
+  inputs:
+    azureSubscription: epicbook-azure-spn-v2
+    scriptType: bash
+    scriptLocation: inlineScript
+    addSpnToEnvironment: true
+    inlineScript: |
+      set -euo pipefail
+      cd "$(Build.SourcesDirectory)"
+
+      export ARM_CLIENT_ID="$servicePrincipalId"
+      export ARM_CLIENT_SECRET="$servicePrincipalKey"
+      export ARM_TENANT_ID="$tenantId"
+      export ARM_SUBSCRIPTION_ID="bd7cdcb9-62d5-4968-a926-35229aa3fe28"
+
+      if ! command -v terraform >/dev/null 2>&1; then
+        curl -fsSLo "$(Agent.TempDirectory)/terraform.zip" \
+          https://releases.hashicorp.com/terraform/1.16.2/terraform_1.16.2_linux_amd64.zip
+        mkdir -p "$(Agent.TempDirectory)/terraform-bin"
+        unzip -oq "$(Agent.TempDirectory)/terraform.zip" \
+          -d "$(Agent.TempDirectory)/terraform-bin"
+        export PATH="$(Agent.TempDirectory)/terraform-bin:$PATH"
+      fi
+
+      terraform version
+      terraform init -input=false
+      terraform validate
+      trap 'rm -f tfplan' EXIT
+      terraform plan -input=false -out=tfplan
+      terraform apply -input=false -auto-approve tfplan
+
+      echo "app_public_ip=$(terraform output -raw app_public_ip)"
+      echo "backend_public_ip=$(terraform output -raw backend_public_ip)"
+      echo "backend_private_ip=$(terraform output -raw backend_private_ip)"
+      echo "mysql_fqdn=$(terraform output -raw mysql_fqdn)"
+  env:
+    TF_VAR_ssh_public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMZjEcisqjhIJFuI0dZoiWuAJQFFnOGwlN4yBCahZOh week10-epicbook'
+    TF_VAR_ssh_allowed_cidr: '51.8.104.41/32'
+    TF_VAR_mysql_admin_password: $(mysqlAdminPassword)
